@@ -2,6 +2,8 @@
 
 便携式随机抽取工具。Windows 优先，同一套代码后续可直接打包安卓。
 
+发布页：<https://github.com/chenmiemiezuiniu-create/random/releases>
+
 ## 功能
 
 | 需求 | 实现 |
@@ -12,6 +14,8 @@
 | 可重复抽取 | 放回抽取，每次都在完整名单里随机 |
 | 一次抽多个 / 一次抽一个 | 人数输入框 + 1/2/3/5/全部 快捷按钮 |
 | 界面 + 无登录 | Flutter 桌面 GUI，打开即用 |
+| 六套主题 | 浅色 / 深色 / 粉色 / 浅蓝 / 紫色 / 跟随系统，入口在主界面右上角「检查更新」左侧，选择会记住 |
+| 六点骰子图标 | exe 与窗口图标，由 `tools/make_icon.py` 生成（纯标准库，不依赖 Pillow） |
 | GitHub 版本更新检测 | 读 `releases/latest`，弹窗提示并提供下载直链；没发 Release 时退回读 `version.json` |
 
 ## 数据文件
@@ -101,11 +105,39 @@ flutter test
 
 ### 一键构建
 
+在项目根目录执行（Windows 自带的 PowerShell 5.1 即可）：
+
 ```powershell
-pwsh -File tools\build_windows.ps1
+.\tools\build_windows.ps1
 ```
 
-它会自动补平台脚手架 + 改中文窗口标题 + 检查 + 测试 + 打包。
+> 装了 PowerShell 7 的话也可以用 `pwsh -File tools\build_windows.ps1`。
+> 注意本机不一定有 `pwsh`，直接用上面那条最稳。
+
+它会自动：补平台脚手架（已存在则跳过）→ 生成骰子图标 → 改中文窗口标题
+→ 检查 → 测试 → 打包。
+
+### ⚠️ 踩坑记录：脚本必须存成 UTF-8 with BOM
+
+`tools\build_windows.ps1` 里全是中文，**必须保存为「UTF-8 with BOM」**。
+Windows PowerShell 5.1 在文件没有 BOM 时会按系统 ANSI（中文机器上是 GBK）
+解析 `.ps1`，中文全部乱码并直接抛语法错误：
+
+```
+Unexpected token '...' in expression or statement.
+The string is missing the terminator: ".
+```
+
+很多编辑器（包括某些 AI 工具）保存时会**悄悄去掉 BOM**，改完脚本务必验证：
+
+```powershell
+$p = 'tools\build_windows.ps1'
+$b = [IO.File]::ReadAllBytes($p)
+"BOM = $($b[0] -eq 0xEF -and $b[1] -eq 0xBB -and $b[2] -eq 0xBF)"
+# 若为 False，用下面两行补回来：
+$c = [IO.File]::ReadAllText($p, [Text.Encoding]::UTF8)
+[IO.File]::WriteAllText($p, $c, (New-Object Text.UTF8Encoding($true)))
+```
 
 ### ⚠️ 踩坑记录：开发者模式 / 符号链接
 
@@ -183,15 +215,18 @@ flutter run -d windows
 验证结果：
 
 - `flutter analyze` → **No issues found!**
-- `flutter test` → **65 个测试全部通过**（46 个逻辑 + 19 个界面）
+- `flutter test` → **84 个测试全部通过**（65 个逻辑 + 19 个界面）
   - 逻辑层：抽取算法、池子推导、权重、txt/json 解析、版本号比较、
-    发布附件选择、序列化往返
+    发布附件选择、序列化往返、跨重启持久化、5000 人规模压测
   - 界面层：真实 widget 树里模拟点击，验证「开始抽取」出结果、一次抽多人、
     连抽到本轮结束并弹出「本轮已抽完」、切模式、改人数、编辑名单保存、
     清空名单被拦下、开始新一轮重置、各对话框可打开
+  - 主题：六套主题逐个渲染 + 抽取，验证 themeMode 真的切换而不是只改标志位
   - 响应式：**900×600 到 1400×900 共 6 种窗口尺寸均无布局溢出**，
     且窄窗口下主按钮仍可点击
-- `dart run tools/verify_updater.dart` → **21 项全过**，包含真实 GitHub API 调用
+- `dart run tools/verify_updater.dart` → **26 项全过**，包含针对**本项目自己
+  发布仓库**的端到端自检（能读到 v1.0.0、能认出旧版本需要更新）
+- exe 内嵌图标实测提取确认是六点骰子
 - `flutter build windows --release` → 成功
 - 实际启动 exe → 正常运行，自动在 exe 旁创建 `RandomPickerData\`
 - 运行期间 `%APPDATA%` **无任何文件被创建或修改** → 零残留成立
@@ -212,17 +247,39 @@ random_picker\
 
 ## 发布更新（GitHub）
 
-1. 建一个 **Public** 仓库。
-2. 改 `lib/core/constants.dart` 里的 `kAppVersion` 和 `pubspec.yaml` 的 `version`。
-3. 重新 `flutter build windows --release`。
-4. 仓库页面 → Releases → *Draft a new release* → Tag 填 `v1.0.1`（要比当前版本大）→ 把新 exe 压缩包拖进附件 → **Publish release**。
-5. 程序里「设置 → GitHub 仓库」填 `用户名/仓库名`，之后启动会自动检查更新。
+发布仓库：<https://github.com/chenmiemiezuiniu-create/random>
 
-不想发 Release 也行：在仓库根目录放一个 `version.json`：
+程序的 `githubRepo` 默认值已经指向它，所以用户**开箱即可收到更新提示**，
+不需要手动配置。
 
-```json
-{ "version": "1.0.1", "notes": "修复了 xxx", "download": "https://.../random_picker.zip" }
-```
+发新版本的完整流程：
+
+1. 改 `lib/core/constants.dart` 里的 `kAppVersion`（比如 `1.0.0` → `1.0.1`）
+   和 `pubspec.yaml` 的 `version`（`1.0.1+2`）。
+2. 重新构建并打包：
+   ```powershell
+   .\tools\build_windows.ps1
+   ```
+   然后把 `build\windows\x64\runner\Release\` 打包成
+   `random_picker_v1.0.1_windows_x64.zip`（**记得剔除 `RandomPickerData\`**）。
+3. 发布。两种方式：
+
+   **A. 命令行（本项目自带脚本）** —— 幂等，可以反复跑：
+   ```powershell
+   node tools\create_release.js     # 需要 GH_TOKEN 环境变量
+   ```
+   脚本会复用同名 Release、删除旧同名附件再上传，最后打印下载直链。
+   用之前记得把脚本里的 `TAG` 改成新版本号。
+
+   **B. 网页** —— 仓库 → Releases → *Draft a new release* →
+   Tag 填 `v1.0.1`（要比当前版本大）→ 拖入 zip → *Publish release*。
+
+4. 顺手把仓库根目录的 `version.json` 也更新一下（`version` 和 `download`），
+   这样万一 Releases 读不到还有兜底。
+
+> ⚠️ 附件名建议带上 `x64`，例如 `random_picker_v1.0.1_windows_x64.zip`。
+> `updater.dart` 会优先挑名字里带 `x64`/`win` 且不含 `arm` 的附件，
+> 避免把 arm64 的包装给 x64 用户（这个坑在 PowerToys 的真实数据上踩过）。
 
 ## 安卓
 
@@ -240,23 +297,28 @@ Flutter 做不出真正的单文件 exe。分发时把整个 Release 文件夹�
 
 ```
 lib/
-  main.dart                      入口，主题
+  main.dart                      入口，主题装配
   core/
     constants.dart               应用名与版本号
     models.dart                  Person / NameList / AppConfig / DrawRecord
     paths.dart                   便携数据目录（便携策略都在这）
+    theme.dart                   六套主题定义
     store.dart                   状态 + 抽取算法 + JSON 持久化
     importer.dart                txt / json 导入解析
-    updater.dart                 GitHub 版本检测与版本号比较
+    updater.dart                 GitHub 版本检测、版本号比较、附件选择
   ui/
-    home_page.dart               主界面
+    home_page.dart               主界面（含右上角主题菜单）
     list_editor_dialog.dart      名单编辑器
     settings_dialog.dart         设置
     update_dialog.dart           发现新版本弹窗
 test/
-  logic_test.dart                46 个逻辑单元测试（真实 I/O）
-  widget_test.dart               19 个界面测试（模拟点击 + 响应式布局）
+  logic_test.dart                65 个逻辑单元测试（真实 I/O）
+  widget_test.dart               19 个界面测试（模拟点击 + 响应式 + 主题）
 tools/
+  make_icon.py                   生成六点骰子 app_icon.ico（标准库手写 PNG+ICO）
+  create_release.js              通过 GitHub API 创建 Release 并上传压缩包
+  verify_algorithm.py            算法验证镜像（见下）
+  verify_updater.dart            更新检测的联网验证（见下）
   build_windows.ps1              一键构建
   verify_algorithm.py            算法验证镜像（见下）
   verify_updater.dart            更新检测的联网验证（见下）
