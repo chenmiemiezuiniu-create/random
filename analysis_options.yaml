@@ -1,0 +1,24 @@
+# 刻意不写 `include: package:flutter_lints/flutter.yaml`。
+#
+# 原因：flutter create 生成的模板配置会引用 flutter_lints 这个包，
+# 一旦 dev_dependencies 里没有它，`flutter analyze` 会直接报
+# "Target of URI doesn't exist"，把整个构建卡死。
+# 这里手写需要的规则，pub get 就永远不会因为 lint 包的版本解析而失败。
+#
+# 想用官方那套规则的话：在 pubspec.yaml 的 dev_dependencies 里加上
+#   flutter_lints: ^4.0.0
+# 然后把下面 analyzer 段替换成 include。
+
+analyzer:
+  exclude:
+    - build/**
+    - .dart_tool/**
+    - android/**
+    - windows/**
+
+linter:
+  rules:
+    - avoid_print
+    - avoid_empty_else
+    - unnecessary_brace_in_string_interps
+    - unrelated_type_equality_checks

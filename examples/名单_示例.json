@@ -1,0 +1,15 @@
+{
+  "name": "示例：班委候选",
+  "people": [
+    { "name": "张伟", "weight": 3, "note": "班长候选" },
+    { "name": "王芳", "weight": 3, "note": "班长候选" },
+    { "name": "李娜", "weight": 2 },
+    { "name": "刘洋", "weight": 2 },
+    { "name": "陈静", "weight": 1 },
+    { "name": "杨帆", "weight": 1 },
+    { "name": "赵磊", "weight": 1 },
+    { "name": "黄敏", "weight": 1 },
+    { "name": "周杰", "weight": 1 },
+    { "name": "吴倩", "weight": 1 }
+  ]
+}

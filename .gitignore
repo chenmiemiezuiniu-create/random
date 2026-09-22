@@ -1,0 +1,29 @@
+# Flutter / Dart
+.dart_tool/
+.packages
+build/
+.flutter-plugins
+.flutter-plugins-dependencies
+
+# IDE
+.idea/
+.vscode/
+*.iml
+
+# Windows
+*.exe
+*.pdb
+*.ilk
+*.exp
+*.lib
+*.obj
+
+# Android
+*.apk
+*.aab
+.gradle/
+local.properties
+
+# 用户运行时产生的数据（不该进仓库）
+RandomPickerData/
+*.tmp

@@ -1,0 +1,31 @@
+name: random_picker
+description: 便携式随机抽人工具（Windows / Android），数据与程序同目录，零残留。
+publish_to: 'none'
+
+# 版本号请与 lib/core/constants.dart 里的 kAppVersion 保持一致
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.3.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  # 检查 GitHub 更新
+  http: ^1.2.2
+  # 打开浏览器下载 / 打开数据目录
+  url_launcher: ^6.3.0
+  # 跨平台路径拼接
+  path: ^1.9.0
+  # 移动端数据目录（Windows 端不使用，保证便携）
+  path_provider: ^2.1.4
+  # 原生「打开文件」对话框
+  file_selector: ^1.0.3
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+
+flutter:
+  uses-material-design: true
