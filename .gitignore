@@ -24,9 +24,14 @@ build/
 .gradle/
 local.properties
 
-# 用户运行时产生的数据（不该进仓库）
-RandomPickerData/
+# 鐢ㄦ埛杩愯鏃朵骇鐢熺殑鏁版嵁锛堜笉璇ヨ繘浠撳簱锛?RandomPickerData/
 *.tmp
 
-# 视觉检查生成的基准图（跟本机字体强相关，不入库）
-tools/goldens/
+# 瑙嗚妫€鏌ョ敓鎴愮殑鍩哄噯鍥撅紙璺熸湰鏈哄瓧浣撳己鐩稿叧锛屼笉鍏ュ簱锛?tools/goldens/
+
+# 构建产物（曾经被误当源码提交过一次，这里堵住）
+# 注意：build/ 只匹配项目根，管不住下面这种嵌套输出目录
+/random_picker/
+*.dll
+*.so
+native_assets.json

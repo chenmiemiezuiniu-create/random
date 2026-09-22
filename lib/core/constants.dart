@@ -5,7 +5,7 @@
 const String kAppName = '随机抽人';
 
 /// 当前程序版本，与 GitHub Release 的 tag（可带 v 前缀）比较。
-const String kAppVersion = '1.0.0';
+const String kAppVersion = '1.0.1';
 
 /// 默认的更新分支（用 version.json 兜底方案时才会用到）。
 const String kDefaultBranch = 'main';

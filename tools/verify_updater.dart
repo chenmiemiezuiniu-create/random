@@ -9,6 +9,7 @@
 // 放进测试套件会让 `flutter test` 变得依赖网络。这里作为手动验证工具保留。
 import 'dart:io';
 
+import 'package:random_picker/core/constants.dart';
 import 'package:random_picker/core/updater.dart';
 
 var _pass = 0;
@@ -114,13 +115,13 @@ Future<void> main() async {
   stdout.writeln('== 联网：本项目自己的发布仓库 ==');
   const ownRepo = 'chenmiemiezuiniu-create/random';
   try {
-    final current = await checkForUpdate(repo: ownRepo, currentVersion: '1.0.0');
+    final current = await checkForUpdate(repo: ownRepo, currentVersion: kAppVersion);
     check('读到了自己 Release 的版本号', current.latest.isNotEmpty, current.latest);
     check('下载直链指向 zip 包',
         current.downloadUrl != null && current.downloadUrl!.endsWith('.zip'),
         current.downloadUrl ?? 'null');
     check('当前已是最新时不会误报更新', !current.hasUpdate,
-        '当前 1.0.0 / 最新 ${current.latest}');
+        '当前 $kAppVersion / 最新 ${current.latest}');
 
     // 假装自己还是旧版本，应该被判为需要更新
     final older = await checkForUpdate(repo: ownRepo, currentVersion: '0.9.0');

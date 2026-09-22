@@ -2,24 +2,56 @@
 //
 // 用法（token 从环境变量读，绝不写在文件里、也不打印）：
 //     $env:GH_TOKEN = "..."
-//     node tools/create_release.js
+//     node tools/create_release.js            # 版本号自动读 lib/core/constants.dart
+//     node tools/create_release.js 1.0.2      # 也可以显式指定
 //
-// 幂等：如果该 tag 的 Release 已存在，会复用它而不是报错；
-// 同名附件已存在时先删除再上传，方便重跑。
+// ⚠️ 如果本机访问 GitHub 要走代理（国内很常见），node 的内置 fetch
+// **不会自动读系统代理**，需要显式开环境变量代理：
+//     $env:HTTPS_PROXY = "http://127.0.0.1:7897"
+//     $env:HTTP_PROXY  = "http://127.0.0.1:7897"
+//     node --use-env-proxy tools/create_release.js
+// 不加这两步会报 `TypeError: fetch failed`。
+//
+// 幂等：该 tag 的 Release 已存在就复用它；同名附件先删再传，方便重跑。
 
 const fs = require('fs');
 const path = require('path');
 
 const TOKEN = process.env.GH_TOKEN;
 const REPO = 'chenmiemiezuiniu-create/random';
-const TAG = 'v1.0.0';
-const ASSET = 'C:\\Users\\30481\\Desktop\\dsh\\random_picker_v1.0.0_windows_x64.zip';
 
-const NOTES = `## 随机抽人 v1.0.0（Windows 版）
+const projectRoot = path.resolve(__dirname, '..');
+const workspaceRoot = path.resolve(projectRoot, '..');
+
+/** 版本号优先取命令行参数，否则从 constants.dart 里读，避免两处不一致。 */
+function readVersion() {
+  if (process.argv[2]) return process.argv[2].replace(/^v/, '');
+  const src = fs.readFileSync(
+    path.join(projectRoot, 'lib', 'core', 'constants.dart'),
+    'utf8'
+  );
+  const m = src.match(/kAppVersion\s*=\s*'([^']+)'/);
+  if (!m) throw new Error('读不到 kAppVersion，请显式传版本号');
+  return m[1];
+}
+
+const VERSION = readVersion();
+const TAG = `v${VERSION}`;
+const ASSET = path.join(workspaceRoot, `random_picker_v${VERSION}_windows_x64.zip`);
+
+const NOTES = `## 随机抽人 ${TAG}（Windows 版）
 
 便携式随机抽取工具。**数据跟程序放在同一个文件夹**，删掉即零残留，不写 C 盘用户目录。
 
-### 功能
+### 本次更新：应用内自动更新
+
+- 发现新版本后可以直接点「立即更新」，**在程序内显示下载进度**，
+  下完自动替换、自动重启，不用再去浏览器手动下载解压
+- 下载会校验文件大小，不完整的包不会被当成成功
+- 替换前自动备份，万一覆盖失败会**自动回滚**，不会留下一个起不来的程序
+- 你的名单和设置完全不受影响
+
+### 功能一览
 
 - **两种抽取模式**
   - 不重复抽取：抽中的人本轮不再出现，抽完为止；也可随时点「开始新一轮」
@@ -27,13 +59,13 @@ const NOTES = `## 随机抽人 v1.0.0（Windows 版）
 - **单人或批量**：一次抽 1 个，或一次抽 N 个；快捷按钮 1 / 2 / 3 / 5 / 全部
 - **名单导入**：支持 \`.txt\`（一行一个名字，写成「张三,3」可设权重，权重 0 表示本轮不参与）
   和 \`.json\`；也可以直接在界面里新建名单、手动输入或粘贴
-- **六套主题**：浅色、深色、粉色、浅蓝、紫色、跟随系统
+- **六套主题**：浅色、深色、粉色、浅蓝、紫色、跟随系统。
+  标题栏颜色会跟着主题走，不会出现「浅色界面配黑标题栏」
 - **无需登录**，打开即用
-- **版本更新检测**：自动检查 GitHub 上的新版本并提示下载
 
 ### 怎么用
 
-1. 下载下面的 \`random_picker_v1.0.0_windows_x64.zip\`
+1. 下载下面的 \`random_picker_v${VERSION}_windows_x64.zip\`
 2. 解压到任意位置（桌面、U 盘都行）
 3. 双击 \`random_picker.exe\`
 
@@ -44,13 +76,6 @@ const NOTES = `## 随机抽人 v1.0.0（Windows 版）
 
 - Windows 10 / 11（64 位）
 - 免安装、免管理员权限、不需要 .NET 运行时
-
-### 已验证
-
-- \`flutter analyze\` 无任何问题
-- 84 个自动化测试全部通过（65 个逻辑 + 19 个界面）
-- 实测运行期间 \`%APPDATA%\` **无任何文件被创建或修改**（零残留）
-- 中文名单在磁盘上以 UTF-8 正确保存
 `;
 
 function headers(extra) {
@@ -82,9 +107,11 @@ async function call(url, options, label) {
   }
   if (!fs.existsSync(ASSET)) {
     console.error('找不到分发包: ' + ASSET);
+    console.error('请先构建并打包成 random_picker_v' + VERSION + '_windows_x64.zip');
     process.exit(1);
   }
 
+  console.log('版本: ' + VERSION);
   console.log('1) 校验 token 权限');
   const me = await call('https://api.github.com/user', { headers: headers() }, '读取用户');
   console.log('   登录身份: ' + me.login);
@@ -106,7 +133,7 @@ async function call(url, options, label) {
         headers: headers({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({
           tag_name: TAG,
-          name: '随机抽人 v1.0.0（Windows）',
+          name: `随机抽人 ${TAG}（Windows）`,
           body: NOTES,
           draft: false,
           prerelease: false,
@@ -121,7 +148,6 @@ async function call(url, options, label) {
   const assetName = path.basename(ASSET);
   console.log('3) 上传附件 ' + assetName);
 
-  // 同名附件先删掉，保证脚本可以重复执行
   const existing = await call(
     `https://api.github.com/repos/${REPO}/releases/${release.id}/assets`,
     { headers: headers() },

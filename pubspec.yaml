@@ -3,7 +3,7 @@ description: 便携式随机抽人工具（Windows / Android），数据与程�
 publish_to: 'none'
 
 # 版本号请与 lib/core/constants.dart 里的 kAppVersion 保持一致
-version: 1.0.0+1
+version: 1.0.1+2
 
 environment:
   sdk: '>=3.3.0 <4.0.0'
@@ -24,6 +24,8 @@ dependencies:
   file_selector: ^1.0.3
   # 调 Windows DWM API 给标题栏上色（只用到 toNativeUtf16 / calloc）
   ffi: ^2.1.0
+  # 解压自动更新下载下来的 zip
+  archive: ^3.6.1
 
 dev_dependencies:
   flutter_test:

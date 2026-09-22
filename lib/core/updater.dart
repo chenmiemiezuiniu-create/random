@@ -1,6 +1,11 @@
+import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:http/http.dart' as http;
+import 'package:http/io_client.dart';
+
+import 'system_proxy.dart';
 
 /// 检查更新时的可预期错误，消息直接展示给用户。
 class UpdateException implements Exception {
@@ -18,6 +23,7 @@ class UpdateInfo {
     required this.latest,
     required this.notes,
     this.downloadUrl,
+    this.downloadSize,
     this.releaseUrl,
   });
 
@@ -25,6 +31,10 @@ class UpdateInfo {
   final String latest;
   final String notes;
   final String? downloadUrl;
+
+  /// 安装包字节数，来自 Release 附件的 size 字段。
+  /// 下载完拿它校验完整性，避免把半截文件当成功。
+  final int? downloadSize;
   final String? releaseUrl;
 
   bool get hasUpdate => compareVersions(latest, current) > 0;
@@ -91,15 +101,13 @@ String normalizeRepo(String input) {
 ///
 /// 公开而非私有：这样 `test/logic_test.dart` 能用合成数据离线覆盖这条规则，
 /// 不必依赖真实网络。
-String? pickAssetUrl(List<dynamic>? assets, String assetSuffix) {
+Map<dynamic, dynamic>? pickAsset(List<dynamic>? assets, String assetSuffix) {
   if (assets == null) return null;
   final candidates = assets.whereType<Map>().toList();
   if (candidates.isEmpty) return null;
 
-  String? urlOf(Map<dynamic, dynamic> asset) {
-    final url = (asset['browser_download_url'] ?? '').toString();
-    return url.isEmpty ? null : url;
-  }
+  bool hasUrl(Map<dynamic, dynamic> asset) =>
+      (asset['browser_download_url'] ?? '').toString().isNotEmpty;
 
   bool suffixMatches(Map<dynamic, dynamic> asset) {
     if (assetSuffix.isEmpty) return true;
@@ -114,12 +122,94 @@ String? pickAssetUrl(List<dynamic>? assets, String assetSuffix) {
   }
 
   for (final asset in candidates) {
-    if (suffixMatches(asset) && looksWindowsX64(asset)) return urlOf(asset);
+    if (hasUrl(asset) && suffixMatches(asset) && looksWindowsX64(asset)) {
+      return asset;
+    }
   }
   for (final asset in candidates) {
-    if (suffixMatches(asset)) return urlOf(asset);
+    if (hasUrl(asset) && suffixMatches(asset)) return asset;
   }
-  return urlOf(candidates.first);
+  final first = candidates.first;
+  return hasUrl(first) ? first : null;
+}
+
+/// 只要下载直链。见 [pickAsset] 的选择规则。
+String? pickAssetUrl(List<dynamic>? assets, String assetSuffix) {
+  final asset = pickAsset(assets, assetSuffix);
+  if (asset == null) return null;
+  final url = (asset['browser_download_url'] ?? '').toString();
+  return url.isEmpty ? null : url;
+}
+
+/// 下载安装包到 [destination]，边下边回调进度。
+///
+/// [onProgress] 的第二个参数在拿不到总长度时为 null（进度条退化成不确定态）。
+/// 下完会校验字节数；对不上就抛 [UpdateException]，绝不把半截文件当成功。
+Future<void> downloadUpdate({
+  required String url,
+  required File destination,
+  required int? expectedSize,
+  void Function(int received, int? total)? onProgress,
+  http.Client? client,
+}) async {
+  final httpClient = client ?? _buildClient();
+  final ownsClient = client == null;
+
+  try {
+    final request = http.Request('GET', Uri.parse(url));
+    request.headers['User-Agent'] = 'RandomPicker-Updater';
+    final response = await httpClient.send(request).timeout(
+          const Duration(seconds: 30),
+        );
+
+    if (response.statusCode != 200) {
+      throw UpdateException(
+        '下载失败：服务器返回 HTTP ${response.statusCode}。\n\n'
+        '如果一直失败，可以到发布页手动下载。',
+      );
+    }
+
+    final total = response.contentLength ?? expectedSize;
+    if (!await destination.parent.exists()) {
+      await destination.parent.create(recursive: true);
+    }
+
+    final sink = destination.openWrite();
+    var received = 0;
+    try {
+      // 必须给流加超时：网络卡住时 `await for` 会永远等下去，
+      // 界面就永远停在「下载中…」。超过 60 秒收不到任何数据就判定失败。
+      await for (final chunk in response.stream.timeout(
+        const Duration(seconds: 60),
+        onTimeout: (sink) => sink.addError(
+          UpdateException('下载超时：60 秒没有收到数据。\n\n可以到发布页手动下载。'),
+        ),
+      )) {
+        sink.add(chunk);
+        received += chunk.length;
+        onProgress?.call(received, total);
+      }
+    } finally {
+      await sink.flush();
+      await sink.close();
+    }
+
+    if (total != null && received != total) {
+      throw UpdateException(
+        '下载不完整：应该 $total 字节，实际只有 $received 字节。\n\n'
+        '可能是网络中断，请重试。',
+      );
+    }
+    if (received == 0) {
+      throw UpdateException('下载到了空文件，请重试。');
+    }
+  } on UpdateException {
+    rethrow;
+  } catch (e) {
+    throw UpdateException('下载失败：$e');
+  } finally {
+    if (ownsClient) httpClient.close();
+  }
 }
 
 /// 检查更新。
@@ -147,21 +237,29 @@ Future<UpdateInfo> checkForUpdate({
   Object networkError = '未能读取发布信息。';
 
   // ---------- 方案一：GitHub Releases ----------
+  final client = _buildClient();
   try {
     final uri = Uri.parse('https://api.github.com/repos/$cleanRepo/releases/latest');
-    final resp = await http.get(uri, headers: _apiHeaders).timeout(const Duration(seconds: 15));
+    final resp = await client
+        .get(uri, headers: _apiHeaders)
+        .timeout(const Duration(seconds: 20));
 
     if (resp.statusCode == 200) {
       final data = jsonDecode(utf8.decode(resp.bodyBytes)) as Map<String, dynamic>;
       final tag = (data['tag_name'] ?? '').toString();
 
-      final download = pickAssetUrl(data['assets'], assetSuffix);
+      final asset = pickAsset(data['assets'], assetSuffix);
+      final download = asset == null
+          ? null
+          : (asset['browser_download_url'] ?? '').toString();
+      final size = asset?['size'];
 
       return UpdateInfo(
         current: currentVersion,
         latest: tag.isEmpty ? currentVersion : tag,
         notes: (data['body'] ?? '').toString().trim(),
         downloadUrl: (download == null || download.isEmpty) ? null : download,
+        downloadSize: size is num ? size.toInt() : null,
         releaseUrl: (data['html_url'] ?? '').toString(),
       );
     }
@@ -179,9 +277,9 @@ Future<UpdateInfo> checkForUpdate({
   // ---------- 方案二：仓库里的 version.json ----------
   try {
     final uri = Uri.parse('https://raw.githubusercontent.com/$cleanRepo/$branch/version.json');
-    final resp = await http
+    final resp = await client
         .get(uri, headers: const {'User-Agent': 'RandomPicker-UpdateChecker'})
-        .timeout(const Duration(seconds: 15));
+        .timeout(const Duration(seconds: 20));
 
     if (resp.statusCode == 200) {
       final data = jsonDecode(utf8.decode(resp.bodyBytes));
@@ -198,6 +296,8 @@ Future<UpdateInfo> checkForUpdate({
     }
   } catch (_) {
     // 两种方案都失败，下面统一抛错
+  } finally {
+    client.close();
   }
 
   throw UpdateException(
@@ -208,4 +308,30 @@ Future<UpdateInfo> checkForUpdate({
     '3. 已经发过一个 Release，或者仓库根目录有 version.json\n\n'
     '详细原因：$networkError',
   );
+}
+
+/// 构造一个会走系统代理的 HTTP 客户端。
+///
+/// Dart 的 HttpClient 默认直连，**不会读 Windows 的系统代理**。
+/// 而 GitHub 的下载地址会重定向到 `release-assets.githubusercontent.com`
+/// 这类域名，在没有代理的网络环境下直接解析不了 —— 表现就是
+/// 「能检测到新版本，但下载永远卡住」。
+http.Client _buildClient() {
+  final inner = HttpClient()
+    ..connectionTimeout = const Duration(seconds: 20);
+  final proxy = SystemProxy.address();
+  if (proxy != null && proxy.isNotEmpty) {
+    inner.findProxy = (Uri uri) {
+      // 本机地址绝不能走代理 —— 否则连本地服务（以及离线调试）都会失败
+      final host = uri.host.toLowerCase();
+      if (host == 'localhost' ||
+          host == '127.0.0.1' ||
+          host == '::1' ||
+          host.endsWith('.localhost')) {
+        return 'DIRECT';
+      }
+      return 'PROXY $proxy';
+    };
+  }
+  return IOClient(inner);
 }

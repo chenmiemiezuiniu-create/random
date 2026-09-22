@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:random_picker/core/constants.dart';
 import 'package:random_picker/core/models.dart';
 import 'package:random_picker/core/paths.dart';
 import 'package:random_picker/core/store.dart';
@@ -74,7 +75,8 @@ void main() {
     await pumpApp(tester);
 
     expect(find.text('随机抽人'), findsOneWidget);
-    expect(find.text('v1.0.0'), findsOneWidget);
+    // 用常量而不是写死版本号，升版时才不会平白断掉
+    expect(find.text('v$kAppVersion'), findsOneWidget);
     expect(find.text('测试名单'), findsWidgets);
     expect(find.text('3 人'), findsOneWidget);
     // 还没抽的时候应该显示引导文案
