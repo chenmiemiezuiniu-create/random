@@ -106,6 +106,31 @@ Future<void> main() async {
     check('空配置给出「去设置里填」的引导', e.message.contains('设置'));
   }
 
+  // ---------------------------------------------------------------
+  // 最关键的一项：让程序自己的更新检测去打**本项目真实发布的仓库**。
+  // 这是「用户拿到 exe 后能不能收到新版本提示」的端到端验证。
+  // ---------------------------------------------------------------
+  stdout.writeln('');
+  stdout.writeln('== 联网：本项目自己的发布仓库 ==');
+  const ownRepo = 'chenmiemiezuiniu-create/random';
+  try {
+    final current = await checkForUpdate(repo: ownRepo, currentVersion: '1.0.0');
+    check('读到了自己 Release 的版本号', current.latest.isNotEmpty, current.latest);
+    check('下载直链指向 zip 包',
+        current.downloadUrl != null && current.downloadUrl!.endsWith('.zip'),
+        current.downloadUrl ?? 'null');
+    check('当前已是最新时不会误报更新', !current.hasUpdate,
+        '当前 1.0.0 / 最新 ${current.latest}');
+
+    // 假装自己还是旧版本，应该被判为需要更新
+    final older = await checkForUpdate(repo: ownRepo, currentVersion: '0.9.0');
+    check('旧版本会被判定为需要更新', older.hasUpdate,
+        '0.9.0 -> ${older.latest}');
+    check('更新说明不为空', older.notes.isNotEmpty, '${older.notes.length} 字符');
+  } catch (e) {
+    check('检查本项目自己的仓库', false, '$e');
+  }
+
   stdout.writeln('');
   stdout.writeln('=' * 52);
   stdout.writeln('通过 $_pass 项，失败 $_fail 项');

@@ -111,7 +111,7 @@ class NameList {
 /// 应用配置，存于 data/config.json。
 class AppConfig {
   AppConfig({
-    this.githubRepo = '',
+    this.githubRepo = 'chenmiemiezuiniu-create/random',
     this.updateBranch = 'main',
     this.autoCheckUpdate = true,
     this.mode = DrawMode.noRepeat,
@@ -122,7 +122,8 @@ class AppConfig {
     this.currentListId,
   });
 
-  /// 形如 "用户名/仓库名"。
+  /// 形如 "用户名/仓库名"。默认指向本项目的发布仓库，
+  /// 这样用户拿到 exe 就能自动检查更新，不用手动配置。
   String githubRepo;
   String updateBranch;
   bool autoCheckUpdate;
@@ -142,7 +143,7 @@ class AppConfig {
   factory AppConfig.fromJson(Map<String, dynamic> json) {
     final count = json['batchCount'];
     return AppConfig(
-      githubRepo: (json['githubRepo'] ?? '').toString(),
+      githubRepo: (json['githubRepo'] ?? 'chenmiemiezuiniu-create/random').toString(),
       updateBranch: (json['updateBranch'] ?? 'main').toString(),
       autoCheckUpdate: json['autoCheckUpdate'] != false,
       mode: DrawMode.fromId(json['mode']?.toString()),
