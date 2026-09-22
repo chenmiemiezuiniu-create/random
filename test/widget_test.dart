@@ -296,16 +296,21 @@ void main() {
   // ------------------------------------------------------- 主题切换
 
   group('主题切换', () {
-    testWidgets('默认浅色，右上角显示浅色图标', (tester) async {
+    /// 打开主题菜单。按钮图标是固定的调色板，不随当前主题变化。
+    Future<void> openThemeMenu(WidgetTester tester) async {
+      await tester.tap(find.byIcon(Icons.palette_outlined));
+      await tester.pumpAndSettle();
+    }
+
+    testWidgets('默认浅色，右上角有主题按钮', (tester) async {
       await pumpApp(tester);
       expect(store.config.themeId, 'light');
-      expect(find.byIcon(Icons.light_mode_outlined), findsOneWidget);
+      expect(find.byIcon(Icons.palette_outlined), findsOneWidget);
     });
 
     testWidgets('菜单里六个主题齐全', (tester) async {
       await pumpApp(tester);
-      await tester.tap(find.byIcon(Icons.light_mode_outlined));
-      await tester.pumpAndSettle();
+      await openThemeMenu(tester);
 
       for (final option in AppThemeOption.values) {
         expect(find.text(option.label), findsOneWidget,
@@ -314,21 +319,67 @@ void main() {
       expect(AppThemeOption.values.length, 6);
     });
 
-    testWidgets('切到深色：写入配置、图标跟随、themeMode 真的变了', (tester) async {
+    testWidgets('菜单左侧指示器：浅色=太阳、深色=月亮、跟随系统=电脑', (tester) async {
       await pumpApp(tester);
+      await openThemeMenu(tester);
 
-      await tester.tap(find.byIcon(Icons.light_mode_outlined));
-      await tester.pumpAndSettle();
+      expect(find.byIcon(Icons.wb_sunny_outlined), findsOneWidget);
+      expect(find.byIcon(Icons.nightlight_outlined), findsOneWidget);
+      expect(find.byIcon(Icons.desktop_windows_outlined), findsOneWidget);
+    });
+
+    testWidgets('菜单左侧指示器：三个颜色主题用圆点而不是图标', (tester) async {
+      await pumpApp(tester);
+      await openThemeMenu(tester);
+
+      // 粉色 / 浅蓝 / 紫色 的 symbolIcon 必须是 null（走圆点分支）
+      for (final id in ['pink', 'blue', 'purple']) {
+        final option = AppThemeOption.fromId(id);
+        expect(option.symbolIcon, isNull, reason: '$id 应该用颜色圆点');
+      }
+      // 而这三个符号图标不该在菜单里出现
+      expect(find.byIcon(Icons.local_florist_outlined), findsNothing);
+      expect(find.byIcon(Icons.water_drop_outlined), findsNothing);
+      expect(find.byIcon(Icons.auto_awesome_outlined), findsNothing);
+
+      // 圆点是画出来的 Container，数一下：3 个颜色主题 + 按钮自身不算
+      final dots = find.byWidgetPredicate((w) =>
+          w is Container &&
+          w.decoration is BoxDecoration &&
+          (w.decoration as BoxDecoration).shape == BoxShape.circle);
+      expect(dots, findsNWidgets(3), reason: '三个颜色主题应各有一个圆点');
+    });
+
+    testWidgets('切到深色：写入配置、themeMode 真的变了', (tester) async {
+      await pumpApp(tester);
+      await openThemeMenu(tester);
+
       await tester.tap(find.text('深色'));
       await tester.pumpAndSettle();
 
       expect(store.config.themeId, 'dark');
-      expect(find.byIcon(Icons.dark_mode_outlined), findsOneWidget);
+      // 菜单关了，按钮还是调色板
+      expect(find.byIcon(Icons.palette_outlined), findsOneWidget);
 
       final app = tester.widget<MaterialApp>(find.byType(MaterialApp));
       expect(app.themeMode, ThemeMode.dark);
       // 深色主题必须真的被构建出来，而不是只改了个标志位
       expect(app.darkTheme?.colorScheme.brightness, Brightness.dark);
+    });
+
+    testWidgets('切到粉色：themeMode 是 light，且用的是粉色系配色', (tester) async {
+      await pumpApp(tester);
+      await openThemeMenu(tester);
+
+      await tester.tap(find.text('粉色'));
+      await tester.pumpAndSettle();
+
+      expect(store.config.themeId, 'pink');
+      final app = tester.widget<MaterialApp>(find.byType(MaterialApp));
+      expect(app.themeMode, ThemeMode.light);
+      final primary = app.theme!.colorScheme.primary;
+      // 粉色主题的主色应当偏红：红分量明显高于绿分量
+      expect(primary.r, greaterThan(primary.g));
     });
 
     testWidgets('「跟随系统」的 themeMode 是 system', (tester) async {
@@ -337,7 +388,7 @@ void main() {
 
       final app = tester.widget<MaterialApp>(find.byType(MaterialApp));
       expect(app.themeMode, ThemeMode.system);
-      expect(find.byIcon(Icons.brightness_auto_outlined), findsOneWidget);
+      expect(find.byIcon(Icons.palette_outlined), findsOneWidget);
     });
 
     testWidgets('六个主题逐个渲染 + 抽一次，全部不报错', (tester) async {

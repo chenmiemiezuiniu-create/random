@@ -27,3 +27,6 @@ local.properties
 # 用户运行时产生的数据（不该进仓库）
 RandomPickerData/
 *.tmp
+
+# 视觉检查生成的基准图（跟本机字体强相关，不入库）
+tools/goldens/

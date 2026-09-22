@@ -22,6 +22,8 @@ dependencies:
   path_provider: ^2.1.4
   # 原生「打开文件」对话框
   file_selector: ^1.0.3
+  # 调 Windows DWM API 给标题栏上色（只用到 toNativeUtf16 / calloc）
+  ffi: ^2.1.0
 
 dev_dependencies:
   flutter_test:

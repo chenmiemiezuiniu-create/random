@@ -494,7 +494,9 @@ class _HomePageState extends State<HomePage> {
 
     return PopupMenuButton<AppThemeOption>(
       tooltip: '切换主题',
-      icon: Icon(current.icon),
+      // 固定用调色板图标：一眼能看出这是「换配色」，
+      // 也避免跟着当前主题变形导致用户找不到入口。
+      icon: Icon(Icons.palette_outlined, color: scheme.onSurfaceVariant),
       onSelected: (option) => store.setTheme(option.id),
       itemBuilder: (ctx) => [
         for (final option in AppThemeOption.values)
@@ -503,12 +505,8 @@ class _HomePageState extends State<HomePage> {
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Icon(
-                  option.icon,
-                  size: 18,
-                  color: option == current ? scheme.primary : null,
-                ),
-                const SizedBox(width: 10),
+                _themeLeading(option, scheme),
+                const SizedBox(width: 12),
                 Text(
                   option.label,
                   style: TextStyle(
@@ -516,9 +514,9 @@ class _HomePageState extends State<HomePage> {
                         option == current ? FontWeight.w600 : FontWeight.normal,
                   ),
                 ),
-                // 当前选中的那个打勾；用固定宽度的占位保持各条目左对齐
+                // 当前选中的打勾；用固定宽度占位让各条目左对齐
                 SizedBox(
-                  width: 28,
+                  width: 26,
                   child: option == current
                       ? Icon(Icons.check, size: 16, color: scheme.primary)
                       : null,
@@ -527,6 +525,30 @@ class _HomePageState extends State<HomePage> {
             ),
           ),
       ],
+    );
+  }
+
+  /// 主题选项左侧的指示器。
+  ///
+  /// 浅色 / 深色 / 跟随系统 表达的是「明暗模式」，用太阳 / 月亮 / 电脑图标；
+  /// 粉色 / 浅蓝 / 紫色 表达的是具体颜色，用一个该色的实心圆点。
+  Widget _themeLeading(AppThemeOption option, ColorScheme scheme) {
+    const size = 18.0;
+    final symbol = option.symbolIcon;
+
+    if (symbol != null) {
+      return Icon(symbol, size: size, color: scheme.onSurfaceVariant);
+    }
+
+    return Container(
+      width: size,
+      height: size,
+      decoration: BoxDecoration(
+        color: option.seed,
+        shape: BoxShape.circle,
+        // 细边框：浅蓝这类浅色在浅背景上也能看清轮廓
+        border: Border.all(color: scheme.outlineVariant),
+      ),
     );
   }
 
