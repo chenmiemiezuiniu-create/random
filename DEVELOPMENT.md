@@ -334,3 +334,119 @@ x64 前面 —— 在 x64 机器上会把 arm64 的包装下来。现在 `pickAs
 > 顺带一提：本项目分发的是 **zip**，所以 `checkForUpdate` 的 `assetSuffix`
 > 默认是空字符串（不限后缀）。如果你的 Release 里同时挂了源码包和 Windows 包，
 > 建议把附件名取得明确些，例如 `random_picker_v1.0.1_windows_x64.zip`。
+
+## 应用内自动更新（v1.0.1 起）
+
+用户在弹窗里点「立即更新」后：程序内下载（带进度条）→ 校验 → 解压 → 备份
+→ 交接给外部脚本 → 主程序退出 → 脚本覆盖文件 → 启动新版。
+
+涉及文件：`lib/core/update_applier.dart`（核心）、`lib/core/system_proxy.dart`、
+`lib/ui/update_dialog.dart`。
+
+### 为什么一定要交给外部脚本
+
+**Windows 会锁住正在运行的 `.exe`，程序无法覆盖自己。** 所以流程是：
+
+```
+主程序                                      apply.cmd（外部）
+  ├─ 下载 zip → RandomPickerData\update\
+  ├─ 解压 → update\staging\random_picker\
+  ├─ 备份现有文件 → update\backup\
+  ├─ 生成 apply.cmd（路径写死在正文里）
+  ├─ 以 DETACHED 方式启动它
+  └─ exit(0) ────────────────────────────► 等 PID 消失
+                                            robocopy 覆盖
+                                            启动新版
+                                            清理 + 自删
+```
+
+脚本的路径**直接写进正文**，不走 `cmd /c` 的参数传递 —— cmd 对带空格路径的
+引号解析极易出错，写死最稳。
+
+### ⚠️ 交接脚本的四条铁律
+
+这四条全是实测踩出来的，**改脚本前务必先看**，每一条都有对应的回归测试：
+
+**1. 换行必须是 CRLF。**
+`buildApplyScript` 会调 `toCrlf()` 归一化。喂 LF-only 的文本给 cmd，它会把
+注释和下一行**粘成一条命令**去执行，报 `'xxx' 不是内部或外部命令`（退出码 9009），
+整个更新静默失败 —— 而脚本文本看上去完全正常，这个坑极难查。
+
+**2. 不能用 `timeout` 延时。**
+脚本是 DETACHED_PROCESS 启动的，**没有控制台**，
+`timeout` 会报「输入重定向不受支持」直接失败。统一用 `ping -n N 127.0.0.1` 等待。
+
+**3. 不能用管道接 `tasklist`。**
+`tasklist ... | findstr ...` 在无控制台的进程里会**直接挂死**，脚本永远走不下去。
+必须改成先重定向到文件、再让 findstr 读文件：
+
+```bat
+tasklist /FI "PID eq %PID%" /NH >"%CHECK%" 2>nul
+findstr /C:"%PID%" "%CHECK%" >nul
+if errorlevel 1 goto copyfiles
+```
+
+**4. 复制用 `robocopy`，且退出码要按位理解。**
+robocopy 的 `/R` `/W` 天生就是「目标被占用就重试」，正好对上「主程序刚退出、
+句柄可能还没释放」这个场景。但它的退出码是**位标志，0~7 全都算成功**，
+只有 `>=8` 才是真失败 —— 写成 `if errorlevel 1` 会把成功当失败，白白回滚。
+
+### 系统代理（国内环境必须）
+
+**Dart 的 `HttpClient` 默认直连，不会读 Windows 的系统代理。**
+后果很隐蔽：`api.github.com` 通常直连可达，所以**版本检测正常**；但下载地址会
+重定向到 `release-assets.githubusercontent.com` 这类域名，直连解析不了，
+表现就是「能发现新版本，但下载永远卡住」。
+
+所以 `SystemProxy.address()` 用 FFI 直接读注册表
+（`HKCU\...\Internet Settings` 的 `ProxyEnable` / `ProxyServer`），
+`_buildClient()` 据此设置 `findProxy`。
+
+**本机地址必须绕过代理**（`localhost` / `127.0.0.1` / `::1` 返回 `DIRECT`），
+否则连本地服务都会失败 —— 这条是被 `test/update_test.dart` 里的本地
+HTTP 服务器测试当场抓出来的。
+
+### 回滚设计
+
+覆盖前先把安装目录（**排除用户数据 `RandomPickerData`**）备份到 `update\backup\`。
+脚本发现 robocopy 返回 `>=8` 就用备份原样恢复再启动，保证用户不会拿到一个
+半新半旧、起不来的程序。
+
+### 测试分层
+
+| 层次 | 文件 | 覆盖内容 |
+|---|---|---|
+| 单元 | `test/update_test.dart` | 下载校验/超时、解压、zip-slip 防护、脚本文本规则（CRLF、无管道、robocopy 退出码） |
+| 真实替换 | `test/update_swap_test.dart` | **真的把 apply.cmd 跑起来**，验证覆盖、回滚、清理 |
+| 联网全流程 | `tools/live_update_test.dart` | 从 GitHub 真下载 11 MB，走完整链路，并确认新版能启动 |
+
+`update_swap_test.dart` 用 `ProcessStartMode.detached` 启动脚本 —— **不能用
+`Process.run`**：它用管道捕获输出，而脚本里的 `start` 会让被启动的子进程继承
+那根管道，于是 Dart 永远等不到 EOF，测试直接挂死。
+
+`tools/live_update_test.dart` 必须显式传 `installDirOverride` —— 默认拿
+`resolvedExecutable` 所在目录，在 `flutter test` 里那是 **Dart SDK 的 bin 目录**，
+真去备份/覆盖它会把 SDK 弄坏。
+
+### 发版流程
+
+1. 改 `lib/core/constants.dart` 的 `kAppVersion` **和** `pubspec.yaml` 的 `version`
+2. `flutter test` + `flutter build windows --release`
+3. 打包成 `random_picker_v<版本>_windows_x64.zip` 放到工作区根目录
+4. `node tools/create_release.js`（版本号会自动从 `constants.dart` 读）
+
+**注意**：本机访问 GitHub 要走代理时，node 的内置 `fetch` 不会自动读系统代理，
+必须 `--use-env-proxy` 并先设好 `HTTPS_PROXY`/`HTTP_PROXY`，否则报
+`TypeError: fetch failed`。
+
+**不要删除旧版本的 Release** —— 自动更新的逻辑是「发现对方版本更高才提示」，
+留着旧版本，那些用户才有机会升上来。
+
+### ⚠️ 别把构建产物提交进仓库
+
+`build/` 只匹配项目根。如果构建输出被复制到项目根下的某个子目录
+（例如 `random_picker/random_picker/`），`.gitignore` 拦不住，
+27 MB 的 DLL 和 exe 会被当成源码提交。
+
+`.gitignore` 里已经加了 `/random_picker/`、`*.dll`、`*.so`、`native_assets.json`
+来堵住这条路。提交前扫一眼 `git status`，这类文件数量多、体积大，很显眼。
