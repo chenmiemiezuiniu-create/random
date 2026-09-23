@@ -175,16 +175,21 @@ class UpdateApplier {
     await staging.create(recursive: true);
 
     _report(UpdateStage.downloading, total: info.downloadSize);
-    await downloadUpdate(
-      url: url,
-      destination: zipFile,
-      expectedSize: info.downloadSize,
-      onProgress: (received, total) => _report(
-        UpdateStage.downloading,
-        received: received,
-        total: total,
-      ),
-    );
+    // 包一层代理回退：代理软件被关掉但注册表还留着开启状态时，自动改直连重试
+    await withProxyFallback((client) {
+      return downloadUpdate(
+        url: url,
+        destination: zipFile,
+        expectedSize: info.downloadSize,
+        expectedSha256: info.downloadSha256,
+        client: client,
+        onProgress: (received, total) => _report(
+          UpdateStage.downloading,
+          received: received,
+          total: total,
+        ),
+      );
+    });
 
     _report(UpdateStage.extracting);
     await extractZipTo(zipFile, staging);

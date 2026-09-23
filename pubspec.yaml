@@ -3,7 +3,7 @@ description: 便携式随机抽人工具（Windows / Android），数据与程�
 publish_to: 'none'
 
 # 版本号请与 lib/core/constants.dart 里的 kAppVersion 保持一致
-version: 1.0.1+2
+version: 1.0.2+3
 
 environment:
   sdk: '>=3.3.0 <4.0.0'
@@ -26,6 +26,8 @@ dependencies:
   ffi: ^2.1.0
   # 解压自动更新下载下来的 zip
   archive: ^3.6.1
+  # 校验下载包的 SHA-256，确保和发布端逐字节一致
+  crypto: ^3.0.3
 
 dev_dependencies:
   flutter_test:

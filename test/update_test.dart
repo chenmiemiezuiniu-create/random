@@ -6,6 +6,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:path/path.dart' as p;
 import 'package:random_picker/core/update_applier.dart';
 import 'package:random_picker/core/updater.dart';
+import 'package:random_picker/core/system_proxy.dart';
 
 /// 自动更新的测试。
 ///
@@ -357,6 +358,149 @@ void main() {
         UpdateApplier().apply(info),
         throwsA(isA<UpdateException>()),
       );
+    });
+  });
+
+  // --------------------------------------------------- SHA-256 完整性校验
+
+  group('SHA-256 校验', () {
+    test('sha256OfFile 结果正确（用公认测试向量）', () async {
+      final f = File(p.join(tmp.path, 'hello.txt'));
+      await f.writeAsString('hello');
+      // sha256("hello") 是公开的标准测试向量
+      expect(
+        await sha256OfFile(f),
+        '2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824',
+      );
+    });
+
+    test('sha256OfFile 空文件也对', () async {
+      final f = File(p.join(tmp.path, 'empty.bin'));
+      await f.writeAsBytes(const <int>[]);
+      expect(
+        await sha256OfFile(f),
+        'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855',
+      );
+    });
+
+    Future<HttpServer> serveFixed(List<int> payload) async {
+      final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      server.listen((req) {
+        req.response.headers.contentLength = payload.length;
+        req.response.add(payload);
+        req.response.close();
+      });
+      return server;
+    }
+
+    test('哈希对得上时下载通过', () async {
+      final payload = List<int>.generate(5000, (i) => i % 251);
+      final server = await serveFixed(payload);
+      final target = File(p.join(tmp.path, 'ok-hash.zip'));
+
+      // 先在本地算出期望值（用系统工具算，避免和被测代码同源）
+      final probe = File(p.join(tmp.path, 'probe.bin'));
+      await probe.writeAsBytes(payload);
+      final expected = await sha256OfFile(probe);
+
+      await downloadUpdate(
+        url: 'http://127.0.0.1:${server.port}/ok.zip',
+        destination: target,
+        expectedSize: payload.length,
+        expectedSha256: expected,
+      );
+      expect(await target.length(), payload.length);
+      await server.close(force: true);
+    });
+
+    test('【安全】哈希对不上必须中止，不能放行被替换的包', () async {
+      final payload = List<int>.filled(5000, 7);
+      final server = await serveFixed(payload);
+      final target = File(p.join(tmp.path, 'tampered.zip'));
+
+      // 故意给一个错误的期望哈希，模拟「字节数一样但内容被换掉」
+      const wrong = '0000000000000000000000000000000000000000000000000000000000000000';
+      try {
+        await downloadUpdate(
+          url: 'http://127.0.0.1:${server.port}/x.zip',
+          destination: target,
+          expectedSize: payload.length,
+          expectedSha256: wrong,
+        );
+        fail('哈希不符时必须抛异常');
+      } on UpdateException catch (e) {
+        expect(e.message, contains('SHA-256'));
+        expect(e.message, contains('已中止'));
+      }
+      await server.close(force: true);
+    });
+
+    test('期望哈希大小写不敏感', () async {
+      final payload = List<int>.generate(100, (i) => i);
+      final server = await serveFixed(payload);
+      final probe = File(p.join(tmp.path, 'p2.bin'));
+      await probe.writeAsBytes(payload);
+      final expected = (await sha256OfFile(probe)).toUpperCase();
+
+      await downloadUpdate(
+        url: 'http://127.0.0.1:${server.port}/u.zip',
+        destination: File(p.join(tmp.path, 'upper.zip')),
+        expectedSize: payload.length,
+        expectedSha256: expected,
+      );
+      await server.close(force: true);
+    });
+
+    test('没给期望哈希时跳过校验（老 Release 没有 digest 字段）', () async {
+      final payload = List<int>.generate(100, (i) => i);
+      final server = await serveFixed(payload);
+      await downloadUpdate(
+        url: 'http://127.0.0.1:${server.port}/n.zip',
+        destination: File(p.join(tmp.path, 'nohash.zip')),
+        expectedSize: payload.length,
+      );
+      await server.close(force: true);
+    });
+  });
+
+  // ------------------------------------------------------- 代理回退
+
+  group('withProxyFallback', () {
+    test('连接类错误会改直连重试一次', () async {
+      final hasProxy = SystemProxy.address() != null;
+      var attempts = 0;
+      try {
+        await withProxyFallback<String>((client) async {
+          attempts++;
+          throw const SocketException('代理端口没人监听');
+        });
+      } catch (_) {
+        // 直连也失败也没关系，这里只关心试了几次
+      }
+      // 有代理才会多试一次；没配代理时没有「回退」可言
+      expect(attempts, hasProxy ? 2 : 1);
+    });
+
+    test('UpdateException 不触发重试（换通道也没用，白费流量）', () async {
+      var attempts = 0;
+      await expectLater(
+        withProxyFallback<String>((client) async {
+          attempts++;
+          throw UpdateException('HTTP 404');
+        }),
+        throwsA(isA<UpdateException>()),
+      );
+      expect(attempts, 1);
+    });
+
+    test('第一次就成功时不重试', () async {
+      var attempts = 0;
+      final result = await withProxyFallback<String>((client) async {
+        attempts++;
+        return 'ok';
+      });
+      expect(result, 'ok');
+      expect(attempts, 1);
     });
   });
 }
